@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Painel de Produção WDC Ilhéus</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="estilo.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+<script src="logo.js"></script>
+</head>
+<body>
+<div class="box">
+  <form class="card" id="f" onsubmit="return false">
+    <img class="logo" id="logo" alt="WDC Networks">
+    <h1>Painel de Produção</h1>
+    <div class="sub">Acesso restrito à equipe WDC Ilhéus</div>
+    <label>E-mail<input id="em" type="email" autocomplete="username" required></label>
+    <label>Senha<input id="pw" type="password" autocomplete="current-password" required></label>
+    <button id="bt" type="submit">Entrar</button>
+    <div class="msg" id="msg"></div>
+  </form>
+  <div class="rod">Esqueceu a senha? Fale com o Harley.</div>
+</div>
+<script>
+(function(){
+  if (window.WD_LOGO) document.getElementById('logo').src = WD_LOGO; else document.getElementById('logo').hidden = true;
+  firebase.initializeApp(WD_FB);
+  var auth = firebase.auth(), db = firebase.firestore();
+  var f = document.getElementById('f'), bt = document.getElementById('bt'), msg = document.getElementById('msg');
+  function dizer(t, cls){ msg.textContent = t; msg.className = 'msg ' + (cls || ''); }
+  var sair = /[?&]sair=1/.test(location.search);
+  if (sair) { auth.signOut(); history.replaceState(null, '', 'index.html'); }
+
+  function carregar(){
+    f.querySelectorAll('input,button').forEach(function(x){ x.disabled = true; });
+    dizer('Carregando o painel...', 'ok');
+    db.collection('painel').doc('meta').get().then(function(m){
+      if (!m.exists) throw new Error('vazio');
+      var meta = m.data(), pedidos = [];
+      for (var i = 0; i < meta.partes; i++) pedidos.push(db.collection('painel').doc('p' + i).get());
+      return Promise.all([meta, fetch('painel.html', {cache:'no-cache'}).then(function(r){ return r.text(); })].concat(pedidos));
+    }).then(function(r){
+      var meta = r[0], html = r[1], txt = '';
+      for (var i = 2; i < r.length; i++) txt += r[i].data().s;
+      var js = '<script>window.WD_GERADO=' + JSON.stringify(meta.gerado || '') + ';window.WD_DADOS=' + txt.replace(/<\//g, '<\\/') + ';<\/script>';
+      html = html.replace('<!--DADOS-->', js);
+      document.open(); document.write(html); document.close();
+    }).catch(function(e){
+      console.error(e);
+      f.querySelectorAll('input,button').forEach(function(x){ x.disabled = false; });
+      if (e && e.code === 'permission-denied') dizer('Seu usuário não tem acesso aos dados.', 'erro');
+      else if (e && e.message === 'vazio') dizer('Os dados ainda não foram enviados. Fale com o Harley.', 'erro');
+      else dizer('Não foi possível carregar. Verifique a internet e tente de novo.', 'erro');
+    });
+  }
+
+  var primeiro = true;
+  auth.onAuthStateChanged(function(u){
+    if (u && !sair) carregar();
+    else if (u && sair) {}
+    primeiro = false; sair = false;
+  });
+
+  f.addEventListener('submit', function(){
+    var em = document.getElementById('em').value.trim(), pw = document.getElementById('pw').value;
+    if (!em || !pw) return;
+    bt.disabled = true; dizer('Entrando...');
+    auth.signInWithEmailAndPassword(em, pw).catch(function(e){
+      bt.disabled = false;
+      var c = e && e.code || '';
+      if (/invalid-credential|wrong-password|user-not-found|invalid-email/.test(c)) dizer('E-mail ou senha incorretos.', 'erro');
+      else if (/too-many-requests/.test(c)) dizer('Muitas tentativas. Espere alguns minutos.', 'erro');
+      else if (/user-disabled/.test(c)) dizer('Este acesso foi desativado.', 'erro');
+      else dizer('Não foi possível entrar. Tente de novo.', 'erro');
+    });
+  });
+})();
+</script>
+</body>
+</html>

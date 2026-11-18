@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Atualizar Painel WDC</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="estilo.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="box">
+  <form class="card" id="login" onsubmit="return false">
+    <h1>Atualizar o painel</h1>
+    <div class="sub">Somente administrador</div>
+    <label>E-mail<input id="em" type="email" autocomplete="username" required></label>
+    <label>Senha<input id="pw" type="password" autocomplete="current-password" required></label>
+    <button id="bt" type="submit">Entrar</button>
+    <div class="msg" id="msg1"></div>
+  </form>
+  <div class="card" id="envio" hidden>
+    <h1>Atualizar o painel</h1>
+    <div class="sub" id="quem"></div>
+    <div class="sub" id="atual">Última atualização: —</div>
+    <label>1. Escolha o arquivo <b>dados.js</b><input id="arq" type="file" accept=".js,.json"></label>
+    <button id="env" type="button" disabled>2. Enviar para o painel</button>
+    <div class="msg" id="msg2"></div>
+    <button class="sec" id="sair" type="button">Sair</button>
+  </div>
+</div>
+<script>
+(function(){
+  firebase.initializeApp(WD_FB);
+  var auth = firebase.auth(), db = firebase.firestore(), col = db.collection('painel');
+  var $ = function(i){ return document.getElementById(i); };
+  function dizer(el, t, cls){ $(el).textContent = t; $(el).className = 'msg ' + (cls || ''); }
+  var lido = null;
+
+  function mostrarAtual(){
+    col.doc('meta').get().then(function(m){
+      $('atual').textContent = 'Última atualização: ' + (m.exists ? (m.data().gerado || '—') : 'nenhuma ainda');
+    }).catch(function(){});
+  }
+
+  auth.onAuthStateChanged(function(u){
+    var adm = u && (u.email || '').toLowerCase() === WD_ADMIN;
+    $('login').hidden = !!adm; $('envio').hidden = !adm;
+    if (u && !adm) { dizer('msg1', 'Este usuário não pode atualizar o painel.', 'erro'); auth.signOut(); }
+    if (adm) { $('quem').textContent = u.email; mostrarAtual(); }
+  });
+
+  $('login').addEventListener('submit', function(){
+    $('bt').disabled = true; dizer('msg1', 'Entrando...');
+    auth.signInWithEmailAndPassword($('em').value.trim(), $('pw').value)
+      .then(function(){ dizer('msg1', ''); })
+      .catch(function(){ dizer('msg1', 'E-mail ou senha incorretos.', 'erro'); })
+      .then(function(){ $('bt').disabled = false; });
+  });
+  $('sair').onclick = function(){ auth.signOut(); };
+
+  $('arq').addEventListener('change', function(){
+    lido = null; $('env').disabled = true; dizer('msg2', '');
+    var file = this.files[0]; if (!file) return;
+    var r = new FileReader();
+    r.onload = function(){
+      try {
+        var t = String(r.result), g = '';
+        var mg = t.match(/window\.WD_GERADO\s*=\s*("(?:[^"\\]|\\.)*")/); if (mg) g = JSON.parse(mg[1]);
+        var k = t.indexOf('window.WD_DADOS='); if (k < 0) throw 0;
+        var j = t.slice(k + 16).trim().replace(/;\s*$/, '');
+        var d = JSON.parse(j);
+        if (!d.producao || !d.apont) throw 0;
+        lido = { gerado: g, json: j };
+        $('env').disabled = false;
+        dizer('msg2', 'Arquivo ok' + (g ? ' (gerado em ' + g + ')' : '') + '. Clique em Enviar.', 'ok');
+      } catch (e) { dizer('msg2', 'Este arquivo não é o dados.js do painel.', 'erro'); }
+    };
+    r.readAsText(file, 'utf-8');
+  });
+
+  $('env').onclick = function(){
+    if (!lido) return;
+    $('env').disabled = true; dizer('msg2', 'Enviando...');
+    var T = 300000, partes = [], b = db.batch();
+    for (var i = 0; i < lido.json.length; i += T) partes.push(lido.json.slice(i, i + T));
+    partes.forEach(function(s, n){ b.set(col.doc('p' + n), { s: s }); });
+    b.set(col.doc('meta'), { partes: partes.length, gerado: lido.gerado || new Date().toLocaleString('pt-BR'), enviado: firebase.firestore.FieldValue.serverTimestamp() });
+    b.commit().then(function(){
+      dizer('msg2', 'Pronto! O painel já está atualizado.', 'ok'); mostrarAtual();
+    }).catch(function(e){
+      console.error(e); $('env').disabled = false;
+      dizer('msg2', e && e.code === 'permission-denied' ? 'Sem permissão para enviar.' : 'Falhou. Tente de novo.', 'erro');
+    });
+  };
+})();
+</script>
+</body>
+</html>
