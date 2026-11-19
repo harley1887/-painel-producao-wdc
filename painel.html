@@ -15,6 +15,10 @@ html,body{margin:0;background:#0b0b0f;}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
 <!--DADOS-->
 <script>if(!window.WD_DADOS){location.replace('index.html');}</script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
 <script>
 (function(){
   // versão de apresentação: os dados vêm de dados.js (foto do dia em que foi gerado)
@@ -24,15 +28,33 @@ html,body{margin:0;background:#0b0b0f;}
   var run = function(){ fns.forEach(function(f){ try { f(); } catch (e) { console.error(e); } }); };
   window.dash = {
     loader: function(){}, calc: function(){}, draw: function(){},
-    data: function(id){ var d = D[id]; return d ? { status:'ok', data:d, columns: d.length ? Object.keys(d[0]) : [] } : { status:'missing', data:[] }; },
+    data: function(id){ var d = D[id]; if (id === 'apont' && d) d = apMerge(d); return d ? { status:'ok', data:d, columns: d.length ? Object.keys(d[0]) : [] } : { status:'missing', data:[] }; },
     onData: function(f){ fns.push(f); f(); },
     params: function(){ return Object.assign({}, P); },
     setParams: function(o){ Object.assign(P, o); run(); },
     resetParams: function(){ P = Object.assign({}, DEF); run(); },
     colors: ['#2f8cff','#ff7a1a','#8b5cf6'],
     setLink: function(n){ try { history.replaceState(null, '', '#' + n); } catch (e) {} },
-    refresh: function(){}
+    refresh: function(){ run(); }
   };
+  // lançamentos salvos pelo Menu gerencial (Firebase) entram junto com os apontamentos da planilha,
+  // menos os que já estão na planilha (mesma data, linha e OP com hora de fim)
+  var mRef = null, mVer = -1, mOut = null;
+  function apMerge(base){
+    var L = window.WD_LANC || [], v = window.WD_LANC_VER || 0;
+    if (base === mRef && v === mVer) return mOut;
+    mRef = base; mVer = v;
+    if (!L.length) { mOut = base; return mOut; }
+    var tem = {}; base.forEach(function(r){ if (r.fim) tem[r.data + '|' + r.linha + '|' + r.op] = 1; });
+    var extra = [], n = base.length;
+    L.forEach(function(l){
+      if (tem[l.data + '|' + l.linha + '|' + l.op]) return;
+      var feito = Math.max(0, (Number(l.qtd) || 0) - (Number(l.sem) || 0));
+      extra.push({ id: ++n, data: l.data, turno: 'Manhã', linha: String(l.linha), cod_pa: String(l.cod || ''), qtd_prog: Number(l.qtd) || 0, takt_s: Number(l.takt) || 0, op: String(l.op || ''), horas_aloc_min: l.prev == null ? null : Math.round(l.prev * 10) / 10, inicio: l.ini || '', fim: l.fim || '', qtd: feito, horas_prod_min: l.real == null ? null : l.real, obs: 'Menu gerencial', integrador: '', nomes: '', lanc: 1 });
+    });
+    mOut = extra.length ? base.concat(extra) : base;
+    return mOut;
+  }
   var t; window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(run, 200); });
 })();
 </script>
@@ -688,11 +710,9 @@ html,body{margin:0;background:#0b0b0f;}
         <div class="mg-and" id="mg-and"></div>
       </div>
       <div class="wd-card" id="mg-lista">
-        <div class="wd-ct"><h2>Lançamentos desta tela</h2><span class="wd-count" id="mg-count"></span></div>
-        <p class="wd-help">Esta versão não grava o que é digitado. Os lançamentos e as OPs em andamento ficam nesta tela até ela ser recarregada ou fechada. Use <b>Copiar para o Excel</b> e cole na planilha.</p>
-        <div class="wd-search"><button type="button" class="mg-btn pri" id="mg-copiar">Copiar para o Excel</button><button type="button" class="mg-btn" id="mg-limpar">Limpar lista</button></div>
-        <textarea class="mg-in mg-copy" id="mg-copytxt" readonly hidden aria-label="Lançamentos para copiar"></textarea>
-        <div class="wd-tbl-wrap"><table class="wd-tbl" id="mg-tbl"><thead><tr><th>Data</th><th>Linha</th><th>OP</th><th>Código</th><th>Descrição</th><th class="n">Qtd</th><th class="n">Takt (s)</th><th>Início</th><th>Fim</th><th class="n">Tempo p/ concluir</th><th class="n">Tempo real</th><th class="n">Sem fazer</th><th>Alimentador</th><th>Integrador</th><th>Embalador</th><th>Tipo</th><th>Pedido</th><th></th></tr></thead><tbody id="mg-tb"></tbody></table></div>
+        <div class="wd-ct"><h2>Lançamentos salvos</h2><span class="wd-count" id="mg-count"></span></div>
+        <p class="wd-help">Os lançamentos salvos ficam guardados no sistema e aparecem para toda a equipe. O Harley passa para a planilha. Aparecem aqui os últimos 30 dias.</p>
+        <div class="wd-tbl-wrap"><table class="wd-tbl" id="mg-tbl"><thead><tr><th>Data</th><th>Linha</th><th>OP</th><th>Código</th><th>Descrição</th><th class="n">Qtd</th><th class="n">Takt (s)</th><th>Início</th><th>Fim</th><th class="n">Tempo p/ concluir</th><th class="n">Tempo real</th><th class="n">Sem fazer</th><th>Alimentador</th><th>Integrador</th><th>Embalador</th><th>Tipo</th><th>Lançado por</th><th>Pedido</th><th></th></tr></thead><tbody id="mg-tb"></tbody></table></div>
         <p class="wd-empty" id="mg-vazio">Nenhum lançamento ainda. Clique no card PRODUÇÃO para lançar.</p>
       </div>
       <div class="mg-ov" id="mg-ov" hidden>
@@ -2228,40 +2248,51 @@ html,body{margin:0;background:#0b0b0f;}
     if (real == null) { $('mg-fim').classList.add('bad'); msg.textContent = 'A hora de fim precisa ser depois da hora de início.'; return; }
     if (!(Number($('mg-takt').value) > 0)) { $('mg-takt').classList.add('bad'); msg.textContent = 'Informe o takt time desse código.'; return; }
     const cod = $('mg-cod').value.trim(), o = S.cods.get(cod);
-    S.rows.push({ data: $('mg-data').value || hoje(), linha: $('mg-linha').value, op: $('mg-op').value.trim(), cod, desc: o ? o.desc : '', qtd: Math.round(Number($('mg-qtd').value)), takt: Number($('mg-takt').value), ini: $('mg-ini').value, fim: $('mg-fim').value, prev, real, sem: Math.max(0, Math.round(Number($('mg-sem').value) || 0)), ali: $('mg-ali').value.trim(), int: $('mg-int').value.trim(), emb: $('mg-emb').value.trim(), pers: S.personal, cli: S.personal ? $('mg-cli').value.trim() : '', ped: $('mg-ped').value.trim() });
-    DR.delete(li0); drafts();
-    close(); list();
+    const reg = ({ data: $('mg-data').value || hoje(), linha: $('mg-linha').value, op: $('mg-op').value.trim(), cod, desc: o ? o.desc : '', qtd: Math.round(Number($('mg-qtd').value)), takt: Number($('mg-takt').value), ini: $('mg-ini').value, fim: $('mg-fim').value, prev, real, sem: Math.max(0, Math.round(Number($('mg-sem').value) || 0)), ali: $('mg-ali').value.trim(), int: $('mg-int').value.trim(), emb: $('mg-emb').value.trim(), pers: S.personal, cli: S.personal ? $('mg-cli').value.trim() : '', ped: $('mg-ped').value.trim() });
+    if (!FB.col) { msg.textContent = 'Sem conexão com o sistema. Recarregue a página e tente de novo.'; return; }
+    $('mg-save').disabled = true; msg.textContent = 'Salvando…';
+    reg.por = FB.email; reg.em = firebase.firestore.FieldValue.serverTimestamp(); reg.exportado = false;
+    FB.col.add(reg).then(() => {
+      $('mg-save').disabled = false; DR.delete(li0); drafts(); close();
+      $('mg-count').textContent = 'Lançamento salvo!';
+    }).catch((e) => { console.error(e); $('mg-save').disabled = false; msg.style.color = 'var(--bad)'; msg.textContent = 'Não foi possível salvar. Verifique a internet e tente de novo.'; });
   }
+  // Firebase: lê os lançamentos dos últimos 30 dias em tempo real
+  const FB = { col: null, email: '' };
+  try {
+    if (!firebase.apps.length) firebase.initializeApp(WD_FB);
+    const d0 = new Date(Date.now() - 30 * 864e5), ini = d0.getFullYear() + '-' + pad(d0.getMonth() + 1) + '-' + pad(d0.getDate());
+    firebase.auth().onAuthStateChanged((u) => {
+      if (!u) return; FB.email = (u.email || '').toLowerCase(); FB.col = firebase.firestore().collection('lancamentos');
+      FB.col.where('data', '>=', ini).onSnapshot((snap) => {
+        S.rows = snap.docs.map((d) => Object.assign({ _id: d.id }, d.data())).sort((a, b) => (b.data + b.fim).localeCompare(a.data + a.fim));
+        window.WD_LANC = S.rows; window.WD_LANC_VER = (window.WD_LANC_VER || 0) + 1;
+        list(); S.key = ''; dash.refresh();
+      }, (e) => console.error(e));
+    });
+  } catch (e) { console.error(e); }
   function list() {
     const tb = $('mg-tb'); tb.replaceChildren();
     S.rows.forEach((r, i) => {
       const tr = document.createElement('tr');
       const td = (t, c) => { const x = document.createElement('td'); x.textContent = t; if (c) x.className = c; tr.appendChild(x); return x; };
-      td(br(r.data)); td('L' + pad(r.linha)); td(r.op); td(r.cod); td(r.desc || '—'); td(nf.format(r.qtd), 'n'); td(String(r.takt).replace('.', ','), 'n'); td(r.ini); td(r.fim); td(hms(r.prev), 'n');
+      td(br(r.data)); td('L' + pad(r.linha)); td(r.op); td(r.cod); td(r.desc || '—'); td(nf.format(r.qtd || 0), 'n'); td(String(r.takt).replace('.', ','), 'n'); td(r.ini); td(r.fim); td(hms(r.prev), 'n');
       const rt = td('', 'n'), p = document.createElement('span'); p.className = 'mg-pill ' + (r.prev != null && r.real > r.prev ? 'late' : 'ok'); p.textContent = hms(r.real); rt.appendChild(p);
       td(nf.format(r.sem), 'n'); td(r.ali || '—'); td(r.int || '—'); td(r.emb || '—');
       const tp = td(''), pl = document.createElement('span'); pl.className = 'mg-pill ' + (r.pers ? 'p' : 'n'); pl.textContent = r.pers ? 'Personalizado' + (r.cli ? ' · ' + r.cli : '') : 'Normal'; tp.appendChild(pl);
-      td(r.ped || '—');
-      const ac = td(''), b = document.createElement('button'); b.type = 'button'; b.className = 'mg-del'; b.textContent = 'Excluir'; b.addEventListener('click', () => { S.rows.splice(i, 1); list(); }); ac.appendChild(b);
+      td(String(r.por || '').split('@')[0] || '—'); td(r.ped || '—');
+      const ac = td('');
+      if (FB.col && r._id && (r.por === FB.email || FB.email === String(window.WD_ADMIN || '').toLowerCase()) && !r.exportado) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'mg-del'; b.textContent = 'Excluir';
+        b.addEventListener('click', () => { if (b.dataset.arm) FB.col.doc(r._id).delete().catch((e) => console.error(e)); else { b.dataset.arm = '1'; b.textContent = 'Confirmar'; setTimeout(() => { if (b.isConnected) { delete b.dataset.arm; b.textContent = 'Excluir'; } }, 3500); } });
+        ac.appendChild(b);
+      } else if (r.exportado) { ac.textContent = 'Na planilha'; }
       tb.appendChild(tr);
     });
     $('mg-vazio').hidden = S.rows.length > 0;
     $('mg-count').textContent = S.rows.length ? S.rows.length + (S.rows.length > 1 ? ' lançamentos' : ' lançamento') : '';
-    $('mg-cnt').textContent = S.rows.length ? S.rows.length + (S.rows.length > 1 ? ' lançamentos nesta tela' : ' lançamento nesta tela') : 'Clique para abrir o formulário';
-    $('mg-copytxt').hidden = true;
+    $('mg-cnt').textContent = 'Clique para abrir o formulário';
   }
-  function tsv() {
-    const H = ['DATA', 'LINHA', 'OP', 'CÓDIGO', 'DESCRIÇÃO', 'QUANTIDADE', 'TAKT TIME (s)', 'HORA INÍCIO', 'HORA FIM', 'TEMPO PARA CONCLUIR', 'TEMPO REAL', 'PEÇAS SEM FAZER', 'ALIMENTADOR', 'INTEGRADOR', 'EMBALADOR', 'PERSONALIZADO', 'CLIENTE', 'PEDIDO'];
-    const cl = (v) => String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' ');
-    return [H].concat(S.rows.map((r) => [br(r.data), 'L' + pad(r.linha), r.op, r.cod, r.desc, r.qtd, String(r.takt).replace('.', ','), r.ini, r.fim, hms(r.prev), hms(r.real), r.sem, r.ali, r.int, r.emb, r.pers ? 'SIM' : 'NÃO', r.cli, r.ped || ''])).map((l) => l.map(cl).join('\t')).join('\n');
-  }
-  $('mg-copiar').addEventListener('click', () => {
-    if (!S.rows.length) { $('mg-count').textContent = 'Nada para copiar'; return; }
-    const t = tsv(), ta = $('mg-copytxt');
-    const fallback = () => { ta.value = t; ta.hidden = false; ta.focus(); ta.select(); $('mg-count').textContent = 'Aperte Ctrl+C para copiar'; };
-    try { navigator.clipboard.writeText(t).then(() => { $('mg-count').textContent = 'Copiado! Cole na planilha (Ctrl+V)'; }, fallback); } catch (e) { fallback(); }
-  });
-  $('mg-limpar').addEventListener('click', () => { S.rows = []; list(); });
   $('card-producao').addEventListener('click', open);
   $('mg-x').addEventListener('click', minimize); $('mg-min').addEventListener('click', minimize); $('mg-cancel').addEventListener('click', close);
   $('mg-ov').addEventListener('click', (e) => { if (e.target === $('mg-ov')) minimize(); });
