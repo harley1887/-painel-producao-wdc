@@ -1299,6 +1299,8 @@ html,body{margin:0;background:#0b0b0f;}
   // tile clicks
   document.querySelectorAll('.wd-tile').forEach((t) => t.addEventListener('click', () => {
     const kind = t.dataset.tile;
+    // trimestres: card Personalizado/Normal/Kit mostra só aquele tipo; Produção real (total) mostra todos
+    { const was = triTipo; triTipo = ['Personalizado', 'Normal', 'Kit'].includes(kind) ? (detailCtx && detailCtx.tile === kind ? '' : kind) : kind === 'total' ? '' : triTipo; if (was !== triTipo && !el('page-trimestres').hidden) setTimeout(drawAll, 0); }
     if (detailCtx && detailCtx.tile === kind && !detailStack.length) { closeDetail(); return; }
     const p = P(); const nd = nonDate(p), dt = inDates(p), rg = dateRange(p);
     const g0 = sum(rows().filter((r) => nd(r) && dt(r)));
@@ -1473,7 +1475,10 @@ html,body{margin:0;background:#0b0b0f;}
     for (const d of fr) addRow(d.k, d, '', () => openDetail({ tile: null, title: d.k, eyebrow, pred: (r) => nd(r) && r.marca === d.k, inP: dt, prev, base: nd }));
   }
 
+  let triTipo = '';
   function drawTrimestres(all, p) {
+    if (triTipo) all = all.filter((r) => r.tipo === triTipo);
+    { const h = document.querySelector('#page-trimestres .wd-ct h2'); h.replaceChildren(document.createTextNode('Variação de um trimestre para o outro')); if (triTipo) { const b = mk('span', '', ' · só ' + NOME[triTipo]); b.style.color = C[triTipo] || ''; h.appendChild(b); } }
     const nd = nonDate(p);
     const q = grouped(all.filter(nd), (r) => r.ano + '-' + Math.ceil(r.mes / 3)).sort((a, b) => a.k.localeCompare(b.k));
     const lastQ = MAXD ? MAXD.slice(0, 4) + '-' + Math.ceil(Number(MAXD.slice(5, 7)) / 3) : '';
