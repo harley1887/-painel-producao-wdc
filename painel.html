@@ -2304,7 +2304,7 @@ html,body{margin:0;background:#0b0b0f;}
     const sel = $('mg-opsel'), info = $('mg-opinfo'), li = $('mg-linha').value;
     sel.replaceChildren(); info.replaceChildren(); manual = false; setManual(false); pickOp(null);
     if (!li) { sel.disabled = true; sel.appendChild(new Option('Escolha a linha primeiro', '')); info.textContent = 'Escolha a linha: as OPs que foram programadas na planilha aparecem aqui.'; return; }
-    const all0 = ops(), feitas = new Set((all0 || []).filter((r) => r.fim).map((r) => String(r.op).trim())), rs = all0 && all0.filter((r) => !r.fim && !feitas.has(String(r.op).trim())), fin = feitas.size;
+    const all0 = ops(), feitas = new Set((all0 || []).filter((r) => r.fim).map((r) => String(r.op).trim())), vistas = new Set(), rs = all0 && all0.filter((r) => { const k = String(r.op).trim(); if (r.fim || feitas.has(k) || (k && vistas.has(k))) return false; vistas.add(k); return true; }), fin = feitas.size;
     if (rs == null) { sel.disabled = true; sel.appendChild(new Option('Carregando programação…', '')); return; }
     codes();
     if (!rs.length) {
