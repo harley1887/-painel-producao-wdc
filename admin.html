@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Atualizar Painel WDC</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap">
+<link rel="stylesheet" href="estilo.css">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="config.js"></script>
+</head>
+<body>
+<div class="box">
+  <form class="card" id="login" onsubmit="return false">
+    <h1>Atualizar o painel</h1>
+    <div class="sub">Somente administrador</div>
+    <label>E-mail<input id="em" type="email" autocomplete="username" required></label>
+    <label>Senha<input id="pw" type="password" autocomplete="current-password" required></label>
+    <button id="bt" type="submit">Entrar</button>
+    <div class="msg" id="msg1"></div>
+  </form>
+  <div class="card" id="envio" hidden>
+    <h1>Atualizar o painel</h1>
+    <div class="sub" id="quem"></div>
+    <div class="sub" id="atual">Última atualização: —</div>
+    <label>1. Escolha o arquivo <b>dados.js</b><input id="arq" type="file" accept=".js,.json"></label>
+    <button id="env" type="button" disabled>2. Enviar para o painel</button>
+    <div class="msg" id="msg2"></div>
+  </div>
+  <div class="card" id="lanc" hidden style="margin-top:16px">
+    <h1>Lançamentos do Menu gerencial</h1>
+    <div class="sub" id="lcnt">Carregando…</div>
+    <button id="lcop" type="button" disabled>Copiar para colar na planilha</button>
+    <textarea id="ltxt" readonly hidden style="font:12px ui-monospace,monospace;background:#0b0b0f;color:#ececf1;border:1px solid #2a2a33;border-radius:8px;min-height:90px;padding:8px"></textarea>
+    <div class="msg" id="lmsg"></div>
+    <div class="sub" style="text-align:left;margin:0">Como colar: abra a planilha, aba <b>APONTAMENTO</b>, clique na primeira célula vazia da coluna <b>Data</b> e aperte <b>Ctrl + V</b>. Depois clique em <b>Marcar como colados</b>.</div>
+    <button class="sec" id="lok" type="button" disabled>Marcar como colados</button>
+  </div>
+  <div class="card" style="margin-top:16px;padding:16px 24px" hidden>
+    <button class="sec" id="sair" type="button">Sair</button>
+  </div>
+</div>
+<script>
+(function(){
+  firebase.initializeApp(WD_FB);
+  var auth = firebase.auth(), db = firebase.firestore(), col = db.collection('painel');
+  var $ = function(i){ return document.getElementById(i); };
+  function dizer(el, t, cls){ $(el).textContent = t; $(el).className = 'msg ' + (cls || ''); }
+  var lido = null;
+
+  function mostrarAtual(){
+    col.doc('meta').get().then(function(m){
+      $('atual').textContent = 'Última atualização: ' + (m.exists ? (m.data().gerado || '—') : 'nenhuma ainda');
+    }).catch(function(){});
+  }
+
+  auth.onAuthStateChanged(function(u){
+    var adm = u && (u.email || '').toLowerCase() === WD_ADMIN;
+    $('login').hidden = !!adm; $('envio').hidden = !adm;
+    if (u && !adm) { dizer('msg1', 'Este usuário não pode atualizar o painel.', 'erro'); auth.signOut(); }
+    $('lanc').hidden = !adm; $('sair').parentNode.hidden = !adm;
+    if (adm) { $('quem').textContent = u.email; mostrarAtual(); ouvir(); }
+  });
+
+  $('login').addEventListener('submit', function(){
+    $('bt').disabled = true; dizer('msg1', 'Entrando...');
+    auth.signInWithEmailAndPassword($('em').value.trim(), $('pw').value)
+      .then(function(){ dizer('msg1', ''); })
+      .catch(function(){ dizer('msg1', 'E-mail ou senha incorretos.', 'erro'); })
+      .then(function(){ $('bt').disabled = false; });
+  });
+  $('sair').onclick = function(){ auth.signOut(); };
+
+  // lançamentos salvos no Menu gerencial que ainda não foram para a planilha
+  var pend = [], ouvindo = false;
+  var pad = function(n){ return String(n).padStart(2, '0'); };
+  var hms = function(m){ if (m == null || !isFinite(m)) return ''; var x = Math.round(m * 60); return pad(Math.floor(x / 3600)) + ':' + pad(Math.floor(x % 3600 / 60)) + ':' + pad(x % 60); };
+  var hh = function(t){ return t ? t + ':00' : ''; };
+  var br = function(d){ return d ? d.slice(8, 10) + '/' + d.slice(5, 7) + '/' + d.slice(0, 4) : ''; };
+  function ouvir(){
+    if (ouvindo) return; ouvindo = true;
+    db.collection('lancamentos').where('exportado', '==', false).onSnapshot(function(snap){
+      pend = snap.docs.map(function(d){ return Object.assign({ _id: d.id }, d.data()); }).sort(function(a, b){ return (a.data + a.ini).localeCompare(b.data + b.ini); });
+      $('lcnt').textContent = pend.length ? pend.length + (pend.length > 1 ? ' lançamentos novos para passar para a planilha' : ' lançamento novo para passar para a planilha') : 'Nenhum lançamento novo. Tudo já está na planilha.';
+      $('lcop').disabled = !pend.length; $('lok').disabled = true; $('ltxt').hidden = true;
+    }, function(e){ console.error(e); $('lcnt').textContent = 'Não foi possível ler os lançamentos.'; });
+  }
+  function linhas(){
+    // mesma ordem das colunas da aba APONTAMENTO (Data até Embalador)
+    return pend.map(function(r){
+      var feito = Math.max(0, (Number(r.qtd) || 0) - (Number(r.sem) || 0));
+      var obs = [r.pers ? 'Personalizado' + (r.cli ? ' ' + r.cli : '') : '', r.ped ? 'Pedido ' + r.ped : '', Number(r.sem) > 0 ? 'resta ' + r.sem : '', (r.paradas || []).length ? 'Paradas: ' + r.paradas.map(function(x){ return x.mot + ' ' + x.ini + '-' + x.fim + ' (' + x.min + ' min)'; }).join('; ') + ' · total ' + (r.parado_min || 0) + ' min' : ''].filter(Boolean).join(' · ');
+      return [br(r.data), 'Manhã', pad(r.linha), r.cod, r.qtd, hms((Number(r.takt) || 0) / 60), r.op, hms(r.prev), hh(r.ini), hh(r.ini), hh(r.fim), feito, hms(r.real), obs, r.int || '', r.ali || '', r.emb || '']
+        .map(function(v){ return String(v == null ? '' : v).replace(/[\t\r\n]+/g, ' '); }).join('\t');
+    }).join('\n');
+  }
+  $('lcop').onclick = function(){
+    var t = linhas(), ta = $('ltxt');
+    var ok = function(){ dizer('lmsg', 'Copiado! Agora cole na planilha (Ctrl + V).', 'ok'); $('lok').disabled = false; };
+    var fb = function(){ ta.value = t; ta.hidden = false; ta.focus(); ta.select(); dizer('lmsg', 'Aperte Ctrl + C para copiar e depois cole na planilha.', 'ok'); $('lok').disabled = false; };
+    try { navigator.clipboard.writeText(t).then(ok, fb); } catch (e) { fb(); }
+  };
+  $('lok').onclick = function(){
+    if (!pend.length) return;
+    var b = db.batch(); pend.forEach(function(r){ b.update(db.collection('lancamentos').doc(r._id), { exportado: true }); });
+    $('lok').disabled = true;
+    b.commit().then(function(){ dizer('lmsg', 'Pronto! Marcados como colados na planilha.', 'ok'); }).catch(function(e){ console.error(e); $('lok').disabled = false; dizer('lmsg', 'Não foi possível marcar. Tente de novo.', 'erro'); });
+  };
+
+  $('arq').addEventListener('change', function(){
+    lido = null; $('env').disabled = true; dizer('msg2', '');
+    var file = this.files[0]; if (!file) return;
+    var r = new FileReader();
+    r.onload = function(){
+      try {
+        var t = String(r.result), g = '';
+        var mg = t.match(/window\.WD_GERADO\s*=\s*("(?:[^"\\]|\\.)*")/); if (mg) g = JSON.parse(mg[1]);
+        var k = t.indexOf('window.WD_DADOS='); if (k < 0) throw 0;
+        var j = t.slice(k + 16).trim().replace(/;\s*$/, '');
+        var d = JSON.parse(j);
+        if (!d.producao || !d.apont) throw 0;
+        lido = { gerado: g, json: j };
+        $('env').disabled = false;
+        dizer('msg2', 'Arquivo ok' + (g ? ' (gerado em ' + g + ')' : '') + '. Clique em Enviar.', 'ok');
+      } catch (e) { dizer('msg2', 'Este arquivo não é o dados.js do painel.', 'erro'); }
+    };
+    r.readAsText(file, 'utf-8');
+  });
+
+  $('env').onclick = function(){
+    if (!lido) return;
+    $('env').disabled = true; dizer('msg2', 'Enviando...');
+    var T = 300000, partes = [], b = db.batch();
+    for (var i = 0; i < lido.json.length; i += T) partes.push(lido.json.slice(i, i + T));
+    partes.forEach(function(s, n){ b.set(col.doc('p' + n), { s: s }); });
+    b.set(col.doc('meta'), { partes: partes.length, gerado: lido.gerado || new Date().toLocaleString('pt-BR'), enviado: firebase.firestore.FieldValue.serverTimestamp() });
+    b.commit().then(function(){
+      dizer('msg2', 'Pronto! O painel já está atualizado.', 'ok'); mostrarAtual();
+    }).catch(function(e){
+      console.error(e); $('env').disabled = false;
+      dizer('msg2', e && e.code === 'permission-denied' ? 'Sem permissão para enviar.' : 'Falhou. Tente de novo.', 'erro');
+    });
+  };
+})();
+</script>
+</body>
+</html>
