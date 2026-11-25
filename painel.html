@@ -2403,7 +2403,7 @@ html,body{margin:0;background:#0b0b0f;}
   }
   setInterval(() => { if (DR.size && !$('page-gerencial').hidden) drafts(); }, 60000);
   // paradas: motivo + Parar; Retorno fecha e mostra o tempo parado
-  const MOTIVOS = ['Horário do Café', 'Horário do Almoço', 'Reunião', 'Sem Matéria-prima', 'Aguardando Material', 'Aguardando OP (PCP)', 'Ajuste da Logo', 'Descarte de Papelão', 'Ginástica Laboral', 'Retrabalho', 'Aniversariante do Mês', 'Manutenção'];
+  const MOTIVOS = ['Horário do Café', 'Horário do Almoço', 'Reunião', 'Sem Matéria-prima', 'Aguardando Material', 'Aguardando OP (PCP)', 'Ajuste da Logo', 'Descarte de Papelão', 'Ginástica Laboral', 'Retrabalho', 'Aniversariante do Mês', 'Manutenção', 'Sistema Inoperante'];
   S.par = []; S.parOn = null;
   const hhmm = (d) => pad(d.getHours()) + ':' + pad(d.getMinutes());
   const parMin = () => S.par.reduce((a, x) => a + x.min, 0);
