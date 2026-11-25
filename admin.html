@@ -26,7 +26,9 @@
     <h1>Atualizar o painel</h1>
     <div class="sub" id="quem"></div>
     <div class="sub" id="atual">Última atualização: —</div>
-    <label>1. Escolha o arquivo <b>dados.js</b><input id="arq" type="file" accept=".js,.json"></label>
+    <label><span>1. Escolha as 3 planilhas .csv da pasta Painel (apontamentos, producao_ilheus e pcp_personalizada)</span><input id="csv" type="file" accept=".csv,text/csv" multiple></label>
+    <div class="sub" id="csvres" style="text-align:left;margin:0"></div>
+    <label><span>ou o arquivo dados.js mandado pelo Claude</span><input id="arq" type="file" accept=".js,.json"></label>
     <button id="env" type="button" disabled>2. Enviar para o painel</button>
     <div class="msg" id="msg2"></div>
   </div>
@@ -44,7 +46,207 @@
   </div>
 </div>
 <script>
+// leitura das planilhas CSV: a mesma do Painel do executivo (Claude)
+window.WDL = {};
+(function(){ var dash = { loader: function(id, o){ WDL[id] = o.fn; } };
+const apLoad = async ({ answer, call, args }) => {
+const txt = (a) => typeof a === 'string' ? a : (a && typeof a.text === 'string' ? a.text : (Array.isArray(a && a.content) ? a.content.map((c) => c.text || '').join('') : JSON.stringify(a ?? '')));
+const parse = (s) => {
+const rows = []; let row = [], f = '', q = false;
+for (let i = 0; i < s.length; i++) {
+const c = s[i];
+if (q) { if (c === '"') { if (s[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+else if (c === '"') q = true;
+else if (c === ';') { row.push(f); f = ''; }
+else if (c === '\n' || c === '\r') { if (c === '\r' && s[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+else f += c;
+}
+if (f !== '' || row.length) { row.push(f); rows.push(row); }
+return rows;
+};
+// the connector answers one page at a time: follow its "re-call with startPage" footer
+const pages = [];
+let t = txt(answer);
+for (let guard = 0; guard < 40; guard++) {
+const m = t.match(/\n\s*\[page [^\]]*\]\s*$/);
+if (!m && !t.includes('";"')) throw new Error(t.slice(0, 300));
+pages.push(m ? t.slice(0, m.index) : t);
+const next = m && m[0].match(/re-call with startPage=(\d+)/);
+if (!next) break;
+t = txt(await call('read_resource', { ...args, startPage: Number(next[1]) }));
+}
+let header = null; const body = [];
+for (const p of pages) {
+const rs = parse(p).filter((r) => r.some((c) => c.trim() !== ''));
+if (!rs.length) continue;
+const h = rs[0].map((x) => x.trim().toUpperCase());
+if (!header) header = h;
+for (let i = h.join('|') === header.join('|') ? 1 : 0; i < rs.length; i++) body.push(rs[i]);
+}
+if (!header) throw new Error('O arquivo veio vazio.');
+const col = (name) => { const i = header.indexOf(name); if (i < 0) throw new Error('Coluna "' + name + '" não encontrada. Cabeçalho: ' + header.join(', ')); return i; };
+const S = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+const num = (v) => { const s = S(v).replace(/\s/g, ''); if (!s) return 0; const c = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(',', '.'); const x = Number(c); return Number.isFinite(x) ? x : 0; };
+const day = (v) => { const s = S(v); let d = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (d) return d[3] + '-' + d[2].padStart(2, '0') + '-' + d[1].padStart(2, '0'); d = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (d) return d[0]; const n = Number(s); if (n > 30000 && n < 80000) return new Date(Math.round((n - 25569) * 864e5)).toISOString().slice(0, 10); return ''; };
+
+const mins = (v) => { const s = S(v); const m = s.match(/^(\d+):(\d{2})(?::(\d{2}))?$/); if (m) return Number(m[1]) * 60 + Number(m[2]) + Number(m[3] || 0) / 60; const n = num(s); return n > 0 && n < 5 ? n * 1440 : 0; };
+const hhmm = (v) => { const s = S(v); const m = s.match(/^(\d{1,2}):(\d{2})/); return m ? m[1].padStart(2, '0') + ':' + m[2] : ''; };
+const iProd = col('PRODUTO');
+const iInt = header.indexOf('INTEGRADOR'), iPes = header.findIndex((h) => h.startsWith('PESSOAS NA LINHA')), iAli = header.indexOf('ALIMENTADOR'), iEmb = header.indexOf('EMBALADOR');
+const I = { data: col('DATA'), turno: col('TURNO'), linha: col('LINHA'), prog: iProd + 1, takt: col('TAKT TIME MEDIDO'), op: col('ORDEM DE PRODUÇÃO'), aloc: col('HORAS ALOCADAS DE PRODUÇÃO'), ini: col('INICIO PRODUÇÃO'), fim: col('FINAL DE PRODUÇÃO'), qtd: col('QUANTIDADE PRODUZIDA DURANTE AS HORAS ALOCADAS2'), gasto: col('HORAS PRODUZIDAS'), obs: col('OBSERVAÇÃO') };
+const rows = [];
+for (const r of body) {
+const data = day(r[I.data]); if (!data) continue;
+rows.push({ id: rows.length + 1, data, turno: S(r[I.turno]), linha: String(Number(r[I.linha]) || S(r[I.linha])), cod_pa: S(r[iProd]).replace(/\.0$/, ''), qtd_prog: Math.round(num(r[I.prog])), takt_s: Math.round(mins(r[I.takt]) * 60 * 10) / 10, op: S(r[I.op]), horas_aloc_min: Math.round(mins(r[I.aloc]) * 10) / 10, inicio: hhmm(r[I.ini]), fim: hhmm(r[I.fim]), qtd: Math.round(num(r[I.qtd])), horas_prod_min: Math.round(mins(r[I.gasto]) * 10) / 10, obs: S(r[I.obs]), integrador: iInt >= 0 ? S(r[iInt]) : '', nomes: iPes >= 0 ? S(r[iPes]) : '', alimentador: iAli >= 0 ? S(r[iAli]) : '', embalador: iEmb >= 0 ? S(r[iEmb]) : '' });
+}
+return { columns: ['id', 'data', 'turno', 'linha', 'cod_pa', 'qtd_prog', 'takt_s', 'op', 'horas_aloc_min', 'inicio', 'fim', 'qtd', 'horas_prod_min', 'obs', 'integrador', 'nomes', 'alimentador', 'embalador'], rows };
+};
+
+dash.loader('producao', {
+description: 'Corrige o fabricante pelo PART# e pelo código PA (marca pelo nome do produto ou, se ele não disser, pela marca mais comum daquele código PA; personalizado quando o PART# diz serigrafado/personalizada, ou quando a planilha diz personalizado e há número de pedido). Lê a cópia em CSV da aba ILHÉUS (pasta L_PRODUÇÃO IOS/Painel), página por página, e transforma em linhas: data no formato ano-mês-dia e quantidades como números.',
+fn: async ({ answer, call, args }) => {
+const txt = (a) => typeof a === 'string' ? a : (a && typeof a.text === 'string' ? a.text : (Array.isArray(a && a.content) ? a.content.map((c) => c.text || '').join('') : JSON.stringify(a ?? '')));
+const parse = (s) => {
+const rows = []; let row = [], f = '', q = false;
+for (let i = 0; i < s.length; i++) {
+const c = s[i];
+if (q) { if (c === '"') { if (s[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+else if (c === '"') q = true;
+else if (c === ';') { row.push(f); f = ''; }
+else if (c === '\n' || c === '\r') { if (c === '\r' && s[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+else f += c;
+}
+if (f !== '' || row.length) { row.push(f); rows.push(row); }
+return rows;
+};
+// the connector answers one page at a time: follow its "re-call with startPage" footer
+const pages = [];
+let t = txt(answer);
+for (let guard = 0; guard < 40; guard++) {
+const m = t.match(/\n\s*\[page [^\]]*\]\s*$/);
+if (!m && !t.includes('";"')) throw new Error(t.slice(0, 300));
+pages.push(m ? t.slice(0, m.index) : t);
+const next = m && m[0].match(/re-call with startPage=(\d+)/);
+if (!next) break;
+t = txt(await call('read_resource', { ...args, startPage: Number(next[1]) }));
+}
+let header = null; const body = [];
+for (const p of pages) {
+const rs = parse(p).filter((r) => r.some((c) => c.trim() !== ''));
+if (!rs.length) continue;
+const h = rs[0].map((x) => x.trim().toUpperCase());
+if (!header) header = h;
+for (let i = h.join('|') === header.join('|') ? 1 : 0; i < rs.length; i++) body.push(rs[i]);
+}
+if (!header) throw new Error('O arquivo veio vazio.');
+const col = (name) => { const i = header.indexOf(name); if (i < 0) throw new Error('Coluna "' + name + '" não encontrada. Cabeçalho: ' + header.join(', ')); return i; };
+const S = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+const num = (v) => { const s = S(v).replace(/\s/g, ''); if (!s) return 0; const c = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(',', '.'); const x = Number(c); return Number.isFinite(x) ? x : 0; };
+const day = (v) => { const s = S(v); let d = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (d) return d[3] + '-' + d[2].padStart(2, '0') + '-' + d[1].padStart(2, '0'); d = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (d) return d[0]; const n = Number(s); if (n > 30000 && n < 80000) return new Date(Math.round((n - 25569) * 864e5)).toISOString().slice(0, 10); return ''; };
+
+// corrige o FABRICANTE pelo PART#: a marca sai do nome do produto e é personalizado quando o PART# diz serigrafado/personalizada
+// (ou quando a planilha já diz personalizado e há número de pedido de venda)
+
+const I = { data: col('DATA'), linha: col('LINHAS'), cod: col('COD. PA'), part: col('PART#'), prev: col('QUANT. PREVISTA'), real: col('QUANT. REAL'), ped: col('PEDIDO / PROPOSTA'), fab: col('FABRICANTE') };
+const marcaPart = (part) => {
+const P = S(part).toUpperCase(), has = (re) => re.test(P);
+if (has(/^E4L/)) return 'EASY4LINK';
+if (has(/HUAWEI/)) return 'HUAWEI';
+if (has(/NOKIA/)) return 'NOKIA';
+if (has(/TP[\s-]?LINK/)) return 'TP LINK';
+if (has(/GRANDSTREAM/)) return 'GRANDSTREAM';
+if (has(/\b(EG8|HG8|K562|WS7\d|MA5[68]|OPTIX|ECHOLIFE|NETENGINE|NE8000|S6[57]\d\d|H90\d|DC908|5008\d{4}|AX2S|AX3S)/)) return 'HUAWEI';
+if (has(/\b(BEACON|BEAM|3TN|3FE|3HE|G-?1425|G-?2425|G-?2426|G-?1426|G-?0425|FX8|FGLT|FANT|FWLT|7750|7250)/)) return 'NOKIA';
+if (has(/\b(GWN|GXP|GRP|GXV|GXW|HT8\d|UCM|WP8\d|GSC|DP7)/)) return 'GRANDSTREAM';
+if (has(/\b(XC220|EX14\d|XX5\d\d|HB8\d\d|DECO|ARCHER)/)) return 'TP LINK';
+if (has(/EASY4LINK/)) return 'EASY4LINK';
+return '';
+};
+// marca mais frequente de cada código PA, contando só as linhas em que o PART# diz a marca
+const porPA = {};
+for (const r of body) { const m = marcaPart(r[I.part]), pa = S(r[I.cod]); if (m && pa) { const o = porPA[pa] = porPA[pa] || {}; o[m] = (o[m] || 0) + 1; } }
+const marcaPA = (pa) => { const o = porPA[S(pa)]; if (!o) return ''; return Object.entries(o).sort((a, b) => b[1] - a[1])[0][0]; };
+const fixFab = (part, fab, ped, pa) => {
+const P = S(part).toUpperCase(), F = S(fab).toUpperCase();
+const m = marcaPart(part) || marcaPA(pa) || F.split(/\s*-\s*/)[0].replace(/\s+/g, ' ').trim();
+if (!m) return '';
+const t = /SERIGRAF|PERSONALIZ/.test(P) || (/PERSONALIZ/.test(F) && /^\d{5,}/.test(S(ped))) ? 'PERSONALIZADO' : (/KIT/.test(F) || /^KIT\b/.test(P)) ? 'KIT' : 'NORMAL';
+return m + ' - ' + t;
+};
+const rows = [];
+for (const r of body) {
+const data = day(r[I.data]); if (!data) continue;
+const pedido = S(r[I.ped]);
+rows.push({ id: rows.length + 1, data, ano: Number(data.slice(0, 4)), mes: Number(data.slice(5, 7)), linha: String(Number(r[I.linha]) || S(r[I.linha])), cod_pa: S(r[I.cod]), produto: S(r[I.part]), fabricante: fixFab(r[I.part], r[I.fab], pedido, r[I.cod]), fab_planilha: S(r[I.fab]), qtd_prevista: Math.round(num(r[I.prev])), qtd_real: Math.round(num(r[I.real])), pedido });
+}
+return { columns: ['id', 'data', 'ano', 'mes', 'linha', 'cod_pa', 'produto', 'fabricante', 'fab_planilha', 'qtd_prevista', 'qtd_real', 'pedido'], rows };
+},
+});
+dash.loader('apont', {
+description: 'Lê a cópia em CSV da aba APONTAMENTO (pasta L_PRODUÇÃO IOS/Painel), página por página, e transforma em linhas: data no formato ano-mês-dia, tempos em minutos e quantidades como números.',
+fn: apLoad,
+});
+dash.loader('pcp', {
+description: 'Lê a cópia em CSV da aba PERSONALIZADA do PCP (pasta L_PRODUÇÃO IOS/Painel) e transforma em linhas: datas no formato ano-mês-dia e quantidades como números.',
+fn: async ({ answer, call, args }) => {
+const txt = (a) => typeof a === 'string' ? a : (a && typeof a.text === 'string' ? a.text : (Array.isArray(a && a.content) ? a.content.map((c) => c.text || '').join('') : JSON.stringify(a ?? '')));
+const parse = (s) => {
+const rows = []; let row = [], f = '', q = false;
+for (let i = 0; i < s.length; i++) {
+const c = s[i];
+if (q) { if (c === '"') { if (s[i + 1] === '"') { f += '"'; i++; } else q = false; } else f += c; }
+else if (c === '"') q = true;
+else if (c === ';') { row.push(f); f = ''; }
+else if (c === '\n' || c === '\r') { if (c === '\r' && s[i + 1] === '\n') i++; row.push(f); rows.push(row); row = []; f = ''; }
+else f += c;
+}
+if (f !== '' || row.length) { row.push(f); rows.push(row); }
+return rows;
+};
+// the connector answers one page at a time: follow its "re-call with startPage" footer
+const pages = [];
+let t = txt(answer);
+for (let guard = 0; guard < 40; guard++) {
+const m = t.match(/\n\s*\[page [^\]]*\]\s*$/);
+if (!m && !t.includes('";"')) throw new Error(t.slice(0, 300));
+pages.push(m ? t.slice(0, m.index) : t);
+const next = m && m[0].match(/re-call with startPage=(\d+)/);
+if (!next) break;
+t = txt(await call('read_resource', { ...args, startPage: Number(next[1]) }));
+}
+let header = null; const body = [];
+for (const p of pages) {
+const rs = parse(p).filter((r) => r.some((c) => c.trim() !== ''));
+if (!rs.length) continue;
+const h = rs[0].map((x) => x.trim().toUpperCase());
+if (!header) header = h;
+for (let i = h.join('|') === header.join('|') ? 1 : 0; i < rs.length; i++) body.push(rs[i]);
+}
+if (!header) throw new Error('O arquivo veio vazio.');
+const col = (name) => { const i = header.indexOf(name); if (i < 0) throw new Error('Coluna "' + name + '" não encontrada. Cabeçalho: ' + header.join(', ')); return i; };
+const S = (v) => String(v ?? '').replace(/\s+/g, ' ').trim();
+const num = (v) => { const s = S(v).replace(/\s/g, ''); if (!s) return 0; const c = /^\d{1,3}(\.\d{3})+(,\d+)?$/.test(s) ? s.replace(/\./g, '').replace(',', '.') : s.replace(',', '.'); const x = Number(c); return Number.isFinite(x) ? x : 0; };
+const day = (v) => { const s = S(v); let d = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/); if (d) return d[3] + '-' + d[2].padStart(2, '0') + '-' + d[1].padStart(2, '0'); d = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (d) return d[0]; const n = Number(s); if (n > 30000 && n < 80000) return new Date(Math.round((n - 25569) * 864e5)).toISOString().slice(0, 10); return ''; };
+
+const iVal = header.findIndex((h) => h.startsWith('VALOR'));
+const money = (v) => num(S(v).replace(/[^\d.,-]/g, ''));
+const I = { modelo: col('MODELO'), mp: col('CODIGO MP'), pa: col('CODIGO PA'), qtd: col('QUANTIDADE'), st: col('STATUS'), ini: col('INICIO DE PRODUÇÃO'), fim: col('FIM DE PRODUÇÃO') };
+const okd = (d) => d && Number(d.slice(0, 4)) >= 2015 && Number(d.slice(0, 4)) <= 2035 ? d : '';
+const rows = [];
+for (const r of body) {
+const modelo = S(r[I.modelo]), qtd = Math.round(num(r[I.qtd]));
+if (!modelo && !qtd) continue;
+const inicio = okd(day(r[I.ini])), fim = okd(day(r[I.fim]));
+rows.push({ id: rows.length + 1, grupo: 'Personalizada', modelo, cod_mp: S(r[I.mp]), cod_pa: S(r[I.pa]), qtd, status: S(r[I.st]), inicio, fim, ano: Number((inicio || fim).slice(0, 4)) || null, pedido: /^\d{5,}$/.test(S(r[I.st])) ? S(r[I.st]) : '', vunit: iVal >= 0 ? Math.round(money(r[iVal]) * 100) / 100 : 0 });
+}
+return { columns: ['id', 'grupo', 'modelo', 'cod_mp', 'cod_pa', 'qtd', 'status', 'inicio', 'fim', 'ano', 'pedido', 'vunit'], rows };
+},
+});
+})();
+</script>
+<script>
 (function(){
+  var ADMINS = [String(window.WD_ADMIN || '').toLowerCase(), 'lucas.barroso@wdcnet.com.br'];
   firebase.initializeApp(WD_FB);
   var auth = firebase.auth(), db = firebase.firestore(), col = db.collection('painel');
   var $ = function(i){ return document.getElementById(i); };
@@ -58,7 +260,7 @@
   }
 
   auth.onAuthStateChanged(function(u){
-    var adm = u && (u.email || '').toLowerCase() === WD_ADMIN;
+    var adm = u && ADMINS.indexOf((u.email || '').toLowerCase()) >= 0;
     $('login').hidden = !!adm; $('envio').hidden = !adm;
     if (u && !adm) { dizer('msg1', 'Este usuário não pode atualizar o painel.', 'erro'); auth.signOut(); }
     $('lanc').hidden = !adm; $('sair').parentNode.hidden = !adm;
@@ -128,6 +330,47 @@
       } catch (e) { dizer('msg2', 'Este arquivo não é o dados.js do painel.', 'erro'); }
     };
     r.readAsText(file, 'utf-8');
+  });
+
+  // as 3 planilhas CSV do SharePoint (pasta L_PRODUÇÃO IOS / Painel)
+  function texto(file){ return file.arrayBuffer().then(function(b){ var t; try { t = new TextDecoder('utf-8', { fatal: true }).decode(b); } catch (e) { t = new TextDecoder('windows-1252').decode(b); } return t.replace(/^\uFEFF/, ''); }); }
+  function qual(n){ n = n.toLowerCase(); return /apont/.test(n) ? 'apont' : /produc/.test(n) ? 'producao' : /pcp|personaliz/.test(n) ? 'pcp' : ''; }
+  function agora(){ var d = new Date(); return pad(d.getDate()) + '/' + pad(d.getMonth() + 1) + '/' + d.getFullYear() + ' às ' + pad(d.getHours()) + ':' + pad(d.getMinutes()); }
+  function maxData(rs){ var m = ''; rs.forEach(function(r){ if (r.data > m) m = r.data; }); return m; }
+  $('csv').addEventListener('change', function(){
+    lido = null; $('env').disabled = true; $('csvres').textContent = ''; dizer('msg2', '');
+    var fs = Array.prototype.slice.call(this.files), F = {};
+    fs.forEach(function(f){ var k = qual(f.name); if (k) F[k] = f; });
+    var falta = ['apont', 'producao', 'pcp'].filter(function(k){ return !F[k]; });
+    if (falta.length) { dizer('msg2', 'Faltou: ' + falta.map(function(k){ return { apont: 'apontamentos.csv', producao: 'producao_ilheus.csv', pcp: 'pcp_personalizada.csv' }[k]; }).join(', ') + '. Escolha os 3 arquivos juntos.', 'erro'); return; }
+    dizer('msg2', 'Lendo as planilhas...');
+    var D = {};
+    Promise.all(['apont', 'producao', 'pcp'].map(function(k){
+      return texto(F[k]).then(function(t){ return WDL[k]({ answer: t, args: {}, call: function(){ return Promise.resolve(''); } }); }).then(function(r){ D[k] = r.rows; });
+    })).then(function(){
+      // histórico antigo dos apontamentos (até 30/06/2026) vem do que já está no painel
+      return col.doc('meta').get().then(function(m){
+        if (!m.exists) throw new Error('sem-hist');
+        var ps = []; for (var i = 0; i < m.data().partes; i++) ps.push(col.doc('p' + i).get());
+        return Promise.all(ps);
+      }).then(function(ds){
+        var velho = JSON.parse(ds.map(function(d){ return d.data().s; }).join(''));
+        var h = (velho.apont || []).filter(function(r){ return r.data <= '2026-06-30'; });
+        if (!h.length) throw new Error('sem-hist');
+        var mx = maxData(h);
+        D.apont = h.concat(D.apont.filter(function(r){ return r.data > mx; })).map(function(r, i){ return Object.assign({}, r, { id: i + 1 }); });
+      });
+    }).then(function(){
+      if (!D.producao.length || !D.apont.length) throw new Error('vazio');
+      var g = agora();
+      lido = { gerado: g, json: JSON.stringify(D) };
+      $('csvres').textContent = 'Produção: ' + D.producao.length.toLocaleString('pt-BR') + ' linhas até ' + br(maxData(D.producao)) + ' · Apontamentos: ' + D.apont.length.toLocaleString('pt-BR') + ' até ' + br(maxData(D.apont)) + ' · PCP: ' + D.pcp.length.toLocaleString('pt-BR') + ' pedidos';
+      $('env').disabled = false;
+      dizer('msg2', 'Planilhas ok. Confira o resumo acima e clique em Enviar.', 'ok');
+    }).catch(function(e){
+      console.error(e);
+      dizer('msg2', e && e.message === 'sem-hist' ? 'Não achei o histórico no painel. Fale com o Harley.' : 'Não consegui ler as planilhas. Confira se são os 3 arquivos .csv da pasta Painel.', 'erro');
+    });
   });
 
   $('env').onclick = function(){
