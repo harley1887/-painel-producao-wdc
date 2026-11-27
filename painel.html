@@ -192,6 +192,7 @@ html,body{margin:0;background:#0b0b0f;}
 .wd-cf.on { background: var(--btn); color: #fff; border-color: #2f8cff; }
 .wd-pop { position: absolute; z-index: 60; width: 300px; background: #18181f; border: 1px solid #3d3d4a; border-radius: 9px; box-shadow: 0 12px 30px rgba(0,0,0,.45); padding: 10px; display: grid; gap: 8px; font-size: 12.5px; }
 .wd-pop[hidden] { display: none !important; }
+.wd-pop, .wd-pop input, .wd-pop button { font-family: var(--font-anthropic-sans, 'Inter', 'Segoe UI', Arial, sans-serif); }
 .wd-pop-list { max-height: 260px; overflow: auto; display: grid; gap: 2px; }
 .wd-pop label { display: flex; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 5px; cursor: pointer; color: #e6e7ec; }
 .wd-pop label:hover { background: rgba(47,140,255,.12); }
@@ -707,10 +708,10 @@ html,body{margin:0;background:#0b0b0f;}
         </div>
         <div class="wd-tbl-wrap"><table class="wd-tbl" id="ped-tbl" data-source="producao" data-row-key="id"><thead><tr>
           <th data-field="id" class="hs"><button type="button" data-sort="id">#</button></th>
-          <th data-field="data"><button type="button" data-sort="data">Data</button></th>
-          <th data-field="pedido"><button type="button" data-sort="pedido">Pedido</button></th>
-          <th data-field="cod_pa"><button type="button" data-sort="cod_pa">Código PA</button></th>
-          <th data-field="produto"><button type="button" data-sort="produto">Descrição</button></th>
+          <th data-field="data"><button type="button" data-sort="data">Data</button><button type="button" class="wd-cf" data-f="pd_data" title="Filtrar Data" aria-label="Filtrar Data">▾</button></th>
+          <th data-field="pedido"><button type="button" data-sort="pedido">Pedido</button><button type="button" class="wd-cf" data-f="pd_ped" title="Filtrar Pedido" aria-label="Filtrar Pedido">▾</button></th>
+          <th data-field="cod_pa"><button type="button" data-sort="cod_pa">Código PA</button><button type="button" class="wd-cf" data-f="pd_cod" title="Filtrar Código PA" aria-label="Filtrar Código PA">▾</button></th>
+          <th data-field="produto"><button type="button" data-sort="produto">Descrição</button><button type="button" class="wd-cf" data-f="pd_desc" title="Filtrar Descrição" aria-label="Filtrar Descrição">▾</button></th>
           <th data-field="marca" class="hs"><button type="button" data-sort="marca">Fabricante</button></th>
           <th data-field="tipo" class="hs"><button type="button" data-sort="tipo">Tipo</button></th>
           <th data-field="linha" class="hs"><button type="button" data-sort="linha">Linha</button></th>
@@ -1599,7 +1600,7 @@ html,body{margin:0;background:#0b0b0f;}
   const JORNADA = 515; // 08:35 por linha por dia
   const hms = (m) => { const neg = m < 0; m = Math.abs(m); const t = Math.round(m * 60), hh = Math.floor(t / 3600), mm = Math.floor(t % 3600 / 60), ss = t % 60; return (neg ? '-' : '') + String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0'); };
   let lSort = 'data', lDir = -1;
-  const colF = { mes: null, linha: null, cod: null, ap_data: null, ap_op: null, ap_ped: null, ap_cod: null, ap_desc: null, ap_lin: null }, colOpts = { mes: [], linha: [], cod: [], ap_data: [], ap_op: [], ap_ped: [], ap_cod: [], ap_desc: [], ap_lin: [] };
+  const colF = { mes: null, linha: null, cod: null, ap_data: null, ap_op: null, ap_ped: null, ap_cod: null, ap_desc: null, ap_lin: null, pd_data: null, pd_ped: null, pd_cod: null, pd_desc: null }, colOpts = { mes: [], linha: [], cod: [], ap_data: [], ap_op: [], ap_ped: [], ap_cod: [], ap_desc: [], ap_lin: [], pd_data: [], pd_ped: [], pd_cod: [], pd_desc: [] };
   const pop = mk('div', 'wd-pop'); pop.hidden = true; document.getElementById('dash-root').appendChild(pop);
   const closePop = () => { pop.hidden = true; };
   document.addEventListener('click', (ev) => { if (!pop.hidden && !pop.contains(ev.target) && !ev.target.closest('.wd-cf')) closePop(); });
@@ -1620,7 +1621,7 @@ html,body{margin:0;background:#0b0b0f;}
     const r = btn.getBoundingClientRect(), root = document.getElementById('dash-root').getBoundingClientRect();
     pop.style.left = Math.max(8, r.left - root.left - 8) + 'px'; pop.style.top = (r.bottom - root.top + 4) + 'px'; pop.hidden = false; srch.focus();
   }
-  document.querySelectorAll('#linha-tbl .wd-cf, #ap-tbl .wd-cf').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); if (!pop.hidden && pop.dataset.f === b.dataset.f) { closePop(); return; } pop.dataset.f = b.dataset.f; openPop(b); }));
+  document.querySelectorAll('#linha-tbl .wd-cf, #ap-tbl .wd-cf, #ped-tbl .wd-cf').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); if (!pop.hidden && pop.dataset.f === b.dataset.f) { closePop(); return; } pop.dataset.f = b.dataset.f; openPop(b); }));
   el('linha-limpar').addEventListener('click', () => { colF.mes = colF.linha = colF.cod = null; drawAll(); });
   document.querySelectorAll('#linha-tbl th[data-s]').forEach((th) => { th.style.cursor = 'pointer'; th.addEventListener('click', (ev) => { if (ev.target.closest('.wd-cf')) return; const k = th.dataset.s; if (lSort === k) lDir = -lDir; else { lSort = k; lDir = ['data', 'dia', 'linha', 'cod', 'desc'].includes(k) ? 1 : -1; } drawAll(); }); });
   function drawLinhaTbl(p, q, de, ate, ls, plist) {
@@ -1703,7 +1704,7 @@ html,body{margin:0;background:#0b0b0f;}
   for (const i of [busca, fPed, fCod]) i.addEventListener('input', () => drawPedidos());
   for (const i of [soPed, fSit]) i.addEventListener('change', () => drawPedidos());
   for (const i of [fDe, fAte]) i.addEventListener('change', () => { if (!i.value || i.validity.valid) drawPedidos(); });
-  el('ped-limpar').addEventListener('click', () => { for (const i of [busca, fPed, fCod, fDe, fAte]) i.value = ''; fSit.value = ''; soPed.checked = true; drawPedidos(); });
+  el('ped-limpar').addEventListener('click', () => { for (const i of [busca, fPed, fCod, fDe, fAte]) i.value = ''; fSit.value = ''; soPed.checked = true; for (const k of ['pd_data', 'pd_ped', 'pd_cod', 'pd_desc']) colF[k] = null; drawPedidos(); });
   const sortVal = (r, k) => (k === 'vu' || k === 'vt') ? ((v) => v ? (k === 'vu' ? v.u : v.u * r.real) : -1)(valOf(r.pedido, r.cod_pa)) : ({ id: Number(r.id), qtd_prevista: r.prev, qtd_real: r.real, linha: Number(r.linha), pct: r.prev ? r.real / r.prev : 0 }[k] ?? String(r[k] ?? '').toLowerCase());
   const fillDL = (id, vals) => el(id).replaceChildren(...vals.slice(0, 2000).map(([v, t]) => { const o = document.createElement('option'); o.value = v; if (t) o.label = t; return o; }));
   function drawPedidos() {
@@ -1720,6 +1721,11 @@ html,body{margin:0;background:#0b0b0f;}
     if (fSit.value === 'ok') list = list.filter((r) => r.real >= r.prev);
     if (fSit.value === 'parcial') list = list.filter((r) => r.real < r.prev);
     if (q) list = list.filter((r) => (r.pedido + ' ' + r.cod_pa + ' ' + r.produto + ' ' + r.marca).toLowerCase().includes(q));
+    // filtros de coluna (▾), como no Excel
+    { const PF = [['pd_data', (r) => r.data, (v) => dBR(v), (a, b) => b.localeCompare(a)], ['pd_ped', (r) => r.pedido || '(vazio)', (v) => v], ['pd_cod', (r) => r.cod_pa || '(vazio)', (v) => v], ['pd_desc', (r) => (r.produto || '(vazio)').trim(), (v) => v]];
+      for (const [k, f, lab, srt] of PF) { const outros = list.filter((r) => PF.every(([k2, f2]) => k2 === k || !colF[k2] || colF[k2].has(f2(r)))); colOpts[k] = [...new Set(outros.map(f))].sort(srt || ((a, b) => String(a).localeCompare(String(b), 'pt-BR', { numeric: true }))).map((v) => [v, lab(v)]); }
+      list = list.filter((r) => PF.every(([k, f]) => !colF[k] || colF[k].has(f(r))));
+      document.querySelectorAll('#ped-tbl .wd-cf').forEach((b) => b.classList.toggle('on', !!colF[b.dataset.f])); }
     list.sort((a, b) => { const x = sortVal(a, sortKey), y = sortVal(b, sortKey); return (x < y ? -1 : x > y ? 1 : 0) * sortDir || (Number(b.id) - Number(a.id)); });
     document.querySelectorAll('#ped-tbl th').forEach((th) => { const b = th.querySelector('button'); th.setAttribute('aria-sort', b && b.dataset.sort === sortKey ? (sortDir > 0 ? 'ascending' : 'descending') : 'none'); });
     const g = sum(list), LIM = 500;
