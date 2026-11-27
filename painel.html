@@ -2062,7 +2062,7 @@ html,body{margin:0;background:#0b0b0f;}
     const FUN = ['Alimentador', 'Integrador', 'Embalador'];
     fun.replaceChildren(...[['', 'Todas'], ...FUN.map((f) => [f, f])].map(([v, t]) => { const b = mk('button', v === rankF ? 'on' : '', t); b.type = 'button'; b.setAttribute('aria-pressed', String(v === rankF)); b.addEventListener('click', () => { rankF = v; drawRank(P()); }); return b; }));
     const pes = (r) => r.func.filter(([, f]) => !rankF || f === rankF);
-    const base = A.filter((r) => r.func.length && (!p.ano || r.ano === p.ano) && (!p.mes || String(r.mes) === String(p.mes)) && (!p.dia || r.data === p.dia));
+    const noPer = inDates(p), base = A.filter((r) => r.func.length && noPer(r));
     const linhas = [...new Set(base.map((r) => r.linha))].filter(Boolean).sort((a, b) => Number(a) - Number(b));
     if (rankL && !linhas.includes(rankL)) rankL = '';
     tabs.replaceChildren(...[['', 'Todas'], ...linhas.map((l) => [l, 'Linha ' + String(l).padStart(2, '0')])].map(([v, t]) => { const b = mk('button', '', t); b.type = 'button'; b.setAttribute('role', 'tab'); b.setAttribute('aria-selected', String(v === rankL)); b.addEventListener('click', () => { rankL = v; drawRank(P()); }); return b; }));
@@ -2084,24 +2084,55 @@ html,body{margin:0;background:#0b0b0f;}
       if (!ok) tr.style.opacity = '.55';
       return tr;
     }));
-    drawEvo2(L);
+    drawEvo2(L, p, A, pes, key, nice);
     if (!L.length) { const tr = mk('tr'), c = mk('td', 'wd-empty', rankF ? 'Nenhum ' + rankF.toLowerCase() + ' lançado no período.' : 'Nenhuma OP com nome e horários no período.'); c.colSpan = 8; tr.appendChild(c); tb.appendChild(tr); }
   }
   // "Quem vem melhorando": aproveitamento na 1ª metade do período x na 2ª metade, por pessoa
-  function drawEvo2(L) {
+  function drawEvo2(L, p, A, pes, key, nice) {
     const box = el('rank-evo'), sub = el('rank-evo-sub'); box.replaceChildren();
-    const ds = [...new Set(L.flatMap((o) => (o.L || []).map((r) => r.data)))].sort();
-    if (ds.length < 4) { sub.textContent = 'Precisa de mais dias com OPs no período para comparar.'; return; }
-    const cut = ds[Math.floor(ds.length / 2)];
     const ap = (l) => { const a = d3.sum(l, (r) => r.aloc), g = d3.sum(l, (r) => r.gasto); return g ? a / g * 100 : null; };
-    const D = L.map((o) => { const a = o.L.filter((r) => r.data < cut), b = o.L.filter((r) => r.data >= cut); return { nome: o.nome, lin: [...o.lin].sort().map((l) => 'L' + String(l).padStart(2, '0')).join(', '), na: a.length, nb: b.length, va: ap(a), vb: ap(b) }; })
-      .filter((d) => d.na >= 3 && d.nb >= 3 && d.va != null && d.vb != null).map((d) => Object.assign(d, { dv: d.vb - d.va })).sort((a, b) => b.dv - a.dv);
-    const last = ds[ds.length - 1], prev = ds.filter((d) => d < cut).pop();
-    sub.textContent = 'Aproveitamento de ' + dBR(ds[0]) + ' a ' + dBR(prev) + ' (tracejado branco na barra) comparado com ' + dBR(cut) + ' a ' + dBR(last) + ' (altura da barra). A linha tracejada cinza é 100%, o tempo previsto. Verde = melhorou, vermelho = piorou. Entra quem tem pelo menos 3 OPs em cada parte. Escala de 50% a 160% para ver melhor a diferença.';
-    if (!D.length) { box.appendChild(mk('div', 'wd-empty', 'Ninguém com OPs suficientes nas duas partes do período.')); return; }
+    const cur = [...new Set(L.flatMap((o) => (o.L || []).map((r) => r.data)))].sort();
+    if (!cur.length) { sub.textContent = 'Nenhuma OP com nome e horários no período escolhido.'; return; }
+    // linhas válidas (mesma linha e função do ranking), fora do filtro de período
+    const ok = (r) => r.func.length && (!rankL || r.linha === rankL) && r.aloc > 0 && r.gasto > 0;
+    const pessoas = (rs) => { const M = new Map(); rs.forEach((r) => { const vis = new Set(); pes(r).forEach(([n]) => { const k = key(n); if (vis.has(k)) return; vis.add(k); if (!M.has(k)) M.set(k, { nome: nice(n), L: [], lin: new Set() }); const o = M.get(k); o.L.push(r); o.lin.add(r.linha); }); }); return M; };
+    const allD = [...new Set(A.filter(ok).map((r) => r.data))].sort();
+    const r0 = dateRange(p), from = cur[0], to = cur[cur.length - 1];
+    const mesN = (ym) => MESL[Number(ym.slice(5, 7)) - 1] + '/' + ym.slice(0, 4);
+    let A1, B1, la, lb, min;
+    if (!r0 && !p.mes) {
+      // modo geral: 1ª metade x 2ª metade de todos os dias
+      if (cur.length < 4) { sub.textContent = 'Precisa de mais dias com OPs para comparar.'; return; }
+      const cut = cur[Math.floor(cur.length / 2)], prev = cur.filter((d) => d < cut).pop();
+      const M = pessoas(A.filter((r) => ok(r)));
+      A1 = new Map([...M].map(([k, o]) => [k, Object.assign({}, o, { L: o.L.filter((r) => r.data < cut) })]));
+      B1 = new Map([...M].map(([k, o]) => [k, Object.assign({}, o, { L: o.L.filter((r) => r.data >= cut) })]));
+      la = dBR(from) + ' a ' + dBR(prev); lb = dBR(cut) + ' a ' + dBR(to); min = 3;
+    } else {
+      // período escolhido x período anterior do mesmo tamanho
+      let prevD;
+      const umDia = r0 && r0.from === r0.to;
+      const umMes = r0 && !r0.tokens ? (p.ano && p.mes) : (r0 && r0.tokens && r0.tokens.length === 1 && r0.tokens[0].length === 7);
+      const umAno = r0 && !r0.tokens && p.ano && !p.mes && !p.dia;
+      if (umDia) { const d = allD.filter((x) => x < from).pop(); prevD = d ? [d] : []; la = d ? dBR(d) : ''; }
+      else if (umMes) { const ym = from.slice(0, 7), y = Number(ym.slice(0, 4)), m = Number(ym.slice(5, 7)), pym = m === 1 ? (y - 1) + '-12' : y + '-' + String(m - 1).padStart(2, '0'); prevD = allD.filter((x) => x.startsWith(pym)); la = mesN(pym); }
+      else if (umAno) { const py = String(Number(p.ano) - 1); prevD = allD.filter((x) => x.startsWith(py)); la = py; }
+      else { prevD = allD.filter((x) => x < from).slice(-cur.length); la = prevD.length ? dBR(prevD[0]) + ' a ' + dBR(prevD[prevD.length - 1]) : ''; }
+      lb = umDia ? dBR(from) : umMes ? mesN(from.slice(0, 7)) : umAno ? p.ano : dBR(from) + ' a ' + dBR(to);
+      if (!prevD.length) { sub.textContent = 'Sem OPs antes de ' + lb + ' para comparar.'; box.appendChild(mk('div', 'wd-empty', 'Não há período anterior com OPs para comparar.')); return; }
+      const PS = new Set(prevD);
+      A1 = pessoas(A.filter((r) => ok(r) && PS.has(r.data)));
+      B1 = new Map(L.map((o) => [key(o.nome), { nome: o.nome, L: o.L || [], lin: o.lin }]));
+      min = umDia ? 1 : cur.length <= 7 ? 2 : 3;
+    }
+    const D = [...B1].map(([k, b]) => { const a = A1.get(k) || { L: [] }; return { nome: b.nome, lin: [...b.lin].sort().map((l) => 'L' + String(l).padStart(2, '0')).join(', '), na: a.L.length, nb: b.L.length, va: ap(a.L), vb: ap(b.L) }; })
+      .filter((d) => d.na >= min && d.nb >= min && d.va != null && d.vb != null).map((d) => Object.assign(d, { dv: d.vb - d.va })).sort((a, b) => b.dv - a.dv);
+    const opsTxt = min === 1 ? 'pelo menos 1 OP' : 'pelo menos ' + min + ' OPs';
+    sub.textContent = 'Aproveitamento em ' + lb + ' (altura da barra) comparado com ' + la + ' (tracejado branco). A linha tracejada cinza é 100%, o tempo previsto. Verde = melhorou, vermelho = piorou. Entra quem tem ' + opsTxt + ' em cada período. Escala de 50% a 160%.';
+    if (!D.length) { box.appendChild(mk('div', 'wd-empty', 'Ninguém com OPs suficientes nos dois períodos.')); return; }
     const nf1 = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 1 });
     glowBars(box, D.slice(0, 8).map((d) => ({ nome: d.nome, ini: d.nome.split(' ').map((w) => w[0]).join('').slice(0, 2).toUpperCase(), v: d.vb, ref: d.va, up: d.dv >= 0, big: nf1.format(d.vb) + '%', chg: (d.dv >= 0 ? '▲ +' : '▼ ') + nf1.format(d.dv) + ' P.P.', sub: d.lin + ' · antes ' + nf1.format(d.va) + '%',
-      tip: [['', 'Linha', d.lin], ['#ececf1', '1ª parte (' + d.na + ' OPs)', pct(d.va)], [d.dv >= 0 ? '#1ed99b' : '#f87171', '2ª parte (' + d.nb + ' OPs)', pct(d.vb)], ['', d.dv >= 0 ? 'Melhorou' : 'Piorou', (d.dv >= 0 ? '+' : '') + nf1.format(d.dv) + ' p.p.']] })), { linha: 100, min: 130, max: 160, floor: 50, label: 'Quem vem melhorando' });
+      tip: [['', 'Linha', d.lin], ['#ececf1', la + ' (' + d.na + ' OPs)', pct(d.va)], [d.dv >= 0 ? '#1ed99b' : '#f87171', lb + ' (' + d.nb + ' OPs)', pct(d.vb)], ['', d.dv >= 0 ? 'Melhorou' : 'Piorou', (d.dv >= 0 ? '+' : '') + nf1.format(d.dv) + ' p.p.']] })), { linha: 100, min: 130, max: 160, floor: 50, label: 'Quem vem melhorando' });
   }
   // barras com brilho: valor grande em cima, mudança, inicial e nome embaixo; tracejado branco = referência
   function glowBars(box, T, o) {
