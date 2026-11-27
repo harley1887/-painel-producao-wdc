@@ -741,7 +741,7 @@ html,body{margin:0;background:#0b0b0f;}
         <div class="wd-ct"><h2>Lançamentos salvos</h2><span class="wd-count" id="mg-count"></span></div>
         <p class="wd-help">Os lançamentos salvos ficam guardados no sistema e aparecem para toda a equipe. O Harley passa para a planilha. Aparecem aqui os últimos 30 dias.</p>
         <div class="mg-fop"><input class="mg-in" id="mg-fop" type="search" inputmode="numeric" placeholder="Filtrar por OP (digite o número)" aria-label="Filtrar por OP"><span id="mg-fop-n"></span></div>
-        <div class="wd-tbl-wrap"><table class="wd-tbl" id="mg-tbl"><thead><tr><th>Data</th><th>Linha</th><th>OP</th><th>Código</th><th>Descrição</th><th class="n">Qtd</th><th class="n">Takt (s)</th><th>Início</th><th>Fim</th><th class="n">Tempo p/ concluir</th><th class="n">Tempo real</th><th class="n">Sem fazer</th><th>Alimentador</th><th>Integrador</th><th>Embalador</th><th>Paradas</th><th>Tipo</th><th>Lançado por</th><th>Pedido</th><th></th></tr></thead><tbody id="mg-tb"></tbody></table></div>
+        <div class="wd-tbl-wrap"><table class="wd-tbl" id="mg-tbl"><thead><tr><th>Data<button type="button" class="wd-cf" data-m="data" title="Filtrar Data" aria-label="Filtrar Data">▾</button></th><th>Linha<button type="button" class="wd-cf" data-m="linha" title="Filtrar Linha" aria-label="Filtrar Linha">▾</button></th><th>OP<button type="button" class="wd-cf" data-m="op" title="Filtrar OP" aria-label="Filtrar OP">▾</button></th><th>Código<button type="button" class="wd-cf" data-m="cod" title="Filtrar Código" aria-label="Filtrar Código">▾</button></th><th>Descrição<button type="button" class="wd-cf" data-m="desc" title="Filtrar Descrição" aria-label="Filtrar Descrição">▾</button></th><th class="n">Qtd</th><th class="n">Takt (s)</th><th>Início</th><th>Fim</th><th class="n">Tempo p/ concluir</th><th class="n">Tempo real</th><th class="n">Sem fazer</th><th>Alimentador</th><th>Integrador</th><th>Embalador</th><th>Paradas</th><th>Tipo</th><th>Lançado por</th><th>Pedido</th><th></th></tr></thead><tbody id="mg-tb"></tbody></table></div>
         <p class="wd-empty" id="mg-vazio">Nenhum lançamento ainda. Clique no card PRODUÇÃO para lançar.</p>
       </div>
       <div class="mg-ov" id="mg-ov" hidden>
@@ -2515,10 +2515,37 @@ html,body{margin:0;background:#0b0b0f;}
       }, (e) => console.error(e));
     });
   } catch (e) { console.error(e); }
+  // filtros de coluna (▾) da tabela de lançamentos, como no Excel
+  const MF = { data: null, linha: null, op: null, cod: null, desc: null };
+  const MFV = { data: (r) => r.data || '', linha: (r) => String(r.linha || ''), op: (r) => String(r.op || '(vazio)'), cod: (r) => String(r.cod || '(vazio)'), desc: (r) => String(r.desc || '(vazio)').trim() };
+  const MFL = { data: (v) => br(v), linha: (v) => 'Linha ' + pad(v), op: (v) => v, cod: (v) => v, desc: (v) => v };
+  const mfPass = (r, skip) => Object.keys(MF).every((k) => k === skip || !MF[k] || MF[k].has(MFV[k](r)));
+  const mPop = document.createElement('div'); mPop.className = 'wd-pop'; mPop.hidden = true; document.getElementById('dash-root').appendChild(mPop);
+  document.addEventListener('click', (ev) => { if (!mPop.hidden && !mPop.contains(ev.target) && !ev.target.closest('#mg-tbl .wd-cf')) mPop.hidden = true; });
+  function mOpen(btn) {
+    const f = btn.dataset.m, base = (S.rows || []).filter((r) => mfPass(r, f));
+    const opts = [...new Set(base.map(MFV[f]))].sort(f === 'data' ? (a, b) => b.localeCompare(a) : (a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }));
+    const sel = new Set(MF[f] || opts); mPop.replaceChildren(); mPop.dataset.m = f;
+    const mk2 = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+    const srch = mk2('input', 'wd-in'); srch.type = 'search'; srch.placeholder = 'Procurar…';
+    const box = mk2('div', 'wd-pop-list'), allL = mk2('label', 'wd-pop-all'), allC = mk2('input'); allC.type = 'checkbox'; allL.append(allC, document.createTextNode(' (Selecionar tudo)'));
+    const items = opts.map((v) => { const l = mk2('label'), c = mk2('input'), t = MFL[f](v); c.type = 'checkbox'; c.checked = sel.has(v); l.dataset.t = String(t).toLowerCase(); c.addEventListener('change', () => { if (c.checked) sel.add(v); else sel.delete(v); syncAll(); }); l.append(c, document.createTextNode(' ' + t)); box.appendChild(l); return [l, c, v]; });
+    const syncAll = () => { const vis = items.filter(([l]) => !l.hidden); allC.checked = vis.length > 0 && vis.every(([, c]) => c.checked); };
+    allC.addEventListener('change', () => { for (const [l, c, v] of items) if (!l.hidden) { c.checked = allC.checked; if (allC.checked) sel.add(v); else sel.delete(v); } });
+    srch.addEventListener('input', () => { const q = srch.value.trim().toLowerCase(); for (const [l] of items) l.hidden = !!q && !l.dataset.t.includes(q); syncAll(); });
+    const bar = mk2('div', 'wd-pop-bar'), ok = mk2('button', 'wd-btn', 'OK'), clr = mk2('button', 'wd-btn ghost', 'Limpar filtro'); ok.type = clr.type = 'button';
+    ok.addEventListener('click', () => { const s2 = srch.value.trim() ? new Set(items.filter(([l, c]) => !l.hidden && c.checked).map((x) => x[2])) : sel; MF[f] = s2.size === opts.length ? null : new Set(s2); mPop.hidden = true; list(); });
+    clr.addEventListener('click', () => { MF[f] = null; mPop.hidden = true; list(); });
+    bar.append(clr, ok); mPop.append(srch, allL, box, bar); syncAll();
+    const r = btn.getBoundingClientRect(), root = document.getElementById('dash-root').getBoundingClientRect();
+    mPop.style.left = Math.max(8, r.left - root.left - 8) + 'px'; mPop.style.top = (r.bottom - root.top + 4) + 'px'; mPop.hidden = false; srch.focus();
+  }
+  document.querySelectorAll('#mg-tbl .wd-cf').forEach((b) => b.addEventListener('click', (ev) => { ev.stopPropagation(); if (!mPop.hidden && mPop.dataset.m === b.dataset.m) { mPop.hidden = true; return; } mOpen(b); }));
   function list() {
     const tb = $('mg-tb'); tb.replaceChildren();
-    const fq = ($('mg-fop').value || '').replace(/\s/g, ''), vis = fq ? S.rows.filter((r) => String(r.op || '').replace(/\s/g, '').includes(fq)) : S.rows;
-    $('mg-fop-n').textContent = fq ? (vis.length ? vis.length + (vis.length > 1 ? ' encontrados' : ' encontrado') : 'Nenhum lançamento com essa OP') : '';
+    const fq = ($('mg-fop').value || '').replace(/\s/g, ''), vis = S.rows.filter((r) => (!fq || String(r.op || '').replace(/\s/g, '').includes(fq)) && mfPass(r));
+    const temF = fq || Object.values(MF).some(Boolean); document.querySelectorAll('#mg-tbl .wd-cf').forEach((b) => b.classList.toggle('on', !!MF[b.dataset.m]));
+    $('mg-fop-n').textContent = temF ? (vis.length ? vis.length + (vis.length > 1 ? ' encontrados' : ' encontrado') : 'Nenhum lançamento com esses filtros') : '';
     vis.forEach((r, i) => {
       const tr = document.createElement('tr');
       const td = (t, c) => { const x = document.createElement('td'); x.textContent = t; if (c) x.className = c; tr.appendChild(x); return x; };
